@@ -1,0 +1,61 @@
+name: Daily News Scraper
+
+on:
+  schedule:
+    # 매일 한국 시간(KST) 정오 12:00 실행 (UTC 기준 03:00)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # GitHub 웹 UI에서 수동으로 즉시 기동 가능하도록 설정
+
+# 엑셀 보고서 갱신 후 깃허브 저장소에 파일 커밋 및 푸시를 위해 쓰기 권한을 명시적으로 선언합니다.
+permissions:
+  contents: write
+
+jobs:
+  scrape_and_report:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install Playwright Chromium Browser
+      run: |
+        playwright install chromium
+
+    - name: Run Scraper and Generate Report
+      # 깃허브 Secrets에 비밀 값(SMTP 정보)을 저장하고, 변수(Vars)나 Secrets에 키워드/이메일을 유연하게 바인딩할 수 있도록 세팅합니다.
+      env:
+        SEARCH_KEYWORDS: ${{ secrets.SEARCH_KEYWORDS || vars.SEARCH_KEYWORDS }}
+        EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS || vars.EMAIL_RECIPIENTS }}
+        SEND_EMAIL: ${{ secrets.SEND_EMAIL || vars.SEND_EMAIL || 'True' }}
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER || vars.SMTP_SERVER || 'smtp.gmail.com' }}
+        SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT || '587' }}
+        SMTP_USER: ${{ secrets.SMTP_USER }}
+        SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      run: python main.py
+
+    - name: Commit and push updated Excel report
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add news_report.xlsx
+        # 변경사항이 존재할 때만 커밋 및 푸시 수행 (오류 방지)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "docs: Auto-update news report [skip ci]" && git push)
